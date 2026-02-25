@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NYC Flood Risk Map</title>
+  <link href="https://unpkg.com/maplibre-gl@4.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.4.0/dist/maplibre-gl.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-dark: #0b0f1e;
+      --bg-panel: rgba(11, 15, 30, 0.92);
+      --border: rgba(255, 255, 255, 0.12);
+      --text: #f1f5f9;
+      --text-muted: rgba(241, 245, 249, 0.5);
+      --accent: #3b82f6;
+      --risk-0: #22c55e;
+      --risk-1: #84cc16;
+      --risk-2: #eab308;
+      --risk-3: #f97316;
+      --risk-4: #ef4444;
+      --risk-5: #991b1b;
+    }
+
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-dark); color: var(--text); }
+
+    /* ── Header ── */
+    #header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 20px;
+      background: linear-gradient(90deg, #0b0f1e 0%, #131d35 100%);
+      border-bottom: 1px solid var(--border);
+      z-index: 200;
+      position: relative;
+      flex-wrap: wrap;
+    }
+
+    #header-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    #header-title .icon { font-size: 1.3rem; }
+    #header-title h1 { font-size: 1.15rem; font-weight: 700; }
+    #header-title h1 span { color: var(--accent); }
+
+    /* ── Search ── */
+    #search-wrap {
+      position: relative;
+      flex: 1;
+      max-width: 480px;
+      min-width: 200px;
+    }
+
+    #search-wrap svg {
+      position: absolute;
+      left: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    #address-input {
+      width: 100%;
+      padding: 9px 14px 9px 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.07);
+      color: var(--text);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color .2s, background .2s;
+    }
+
+    #address-input:focus { border-color: var(--accent); background: rgba(255,255,255,0.1); }
+    #address-input::placeholder { color: var(--text-muted); }
+
+    #autocomplete-list {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: #1a2240;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      z-index: 9999;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .ac-item {
+      padding: 9px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      transition: background .15s;
+    }
+    .ac-item:last-child { border-bottom: none; }
+    .ac-item:hover, .ac-item.ac-active { background: rgba(59, 130, 246, 0.2); }
+    .ac-item .ac-main { font-size: 0.85rem; font-weight: 500; }
+    .ac-item .ac-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Map ── */
+    #map-wrap { position: relative; height: calc(100vh - 57px); }
+    #map { width: 100%; height: 100%; }
+
+    /* ── Floating panel base ── */
+    .fp {
+      position: absolute;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+    .fp h3 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    /* ── Layer panel ── */
+    #layer-panel { top: 14px; left: 14px; min-width: 210px; }
+
+    .layer-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 9px;
+      cursor: pointer;
+    }
+    .layer-row:last-child { margin-bottom: 0; }
+
+    .layer-swatch {
+      width: 12px; height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .layer-name { font-size: 0.8rem; flex: 1; line-height: 1.3; }
+
+    .toggle-pill {
+      width: 30px; height: 16px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 8px;
+      position: relative;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .toggle-pill.on { background: var(--accent); }
+    .toggle-pill::after {
+      content: '';
+      position: absolute;
+      width: 12px; height: 12px;
+      background: #fff;
+      border-radius: 50%;
+      top: 2px; left: 2px;
+      transition: transform .2s;
+    }
+    .toggle-pill.on::after { transform: translateX(14px); }
+
+    /* ── Legend ── */
+    #legend { bottom: 36px; left: 14px; min-width: 185px; }
+
+    .legend-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+    .legend-row:last-child { margin-bottom: 0; }
+    .legend-box { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.15); }
+    .legend-lbl { font-size: 0.75rem; }
+
+    /* ── Risk Panel ── */
+    #risk-panel {
+      top: 14px; right: 14px;
+      width: 300px;
+      display: none;
+    }
+    #risk-panel.open { display: block; }
+
+    .rp-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .rp-addr { font-size: 0.75rem; color: var(--text-muted); }
+    .rp-place { font-size: 0.95rem; font-weight: 600; margin-top: 2px; }
+
+    #rp-close {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 1.2rem; line-height: 1; padding: 2px;
+    }
+    #rp-close:hover { color: var(--text); }
+
+    .risk-score-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+    .risk-badge {
+      width: 48px; height: 48px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; font-weight: 800;
+      flex-shrink: 0;
+    }
+    .rb-0 { background: var(--risk-0); }
+    .rb-1 { background: var(--risk-1); }
+    .rb-2 { background: var(--risk-2); }
+    .rb-3 { background: var(--risk-3); }
+    .rb-4 { background: var(--risk-4); }
+    .rb-5 { background: var(--risk-5); }
+
+    .risk-title { font-size: 1rem; font-weight: 700; }
+    .risk-subtitle { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+    .risk-bars { display: flex; gap: 3px; margin: 8px 0 14px; }
+    .risk-bar {
+      flex: 1; height: 6px; border-radius: 3px;
+      background: rgba(255,255,255,0.1);
+      transition: background .4s;
+    }
+
+    .rp-divider { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+
+    .factor {
+      display: flex; gap: 8px; margin-bottom: 10px;
+    }
+    .factor:last-child { margin-bottom: 0; }
+    .factor-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+    .factor-title { font-size: 0.8rem; font-weight: 600; }
+    .factor-desc { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+
+    .fc-high { color: #f87171; }
+    .fc-med  { color: #fb923c; }
+    .fc-low  { color: #fbbf24; }
+    .fc-ok   { color: #4ade80; }
+
+    /* ── Spinner / Loading ── */
+    #loading {
+      display: none;
+      position: absolute;
+      bottom: 36px; right: 14px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      z-index: 200;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      align-items: center;
+      gap: 8px;
+    }
+    #loading.show { display: flex; }
+
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Tooltip ── */
+    .flood-popup .maplibregl-popup-content {
+      background: rgba(15, 20, 40, 0.95) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 7px !important;
+      color: var(--text) !important;
+      padding: 8px 12px !important;
+      font-size: 0.8rem !important;
+      line-height: 1.5;
+      backdrop-filter: blur(8px);
+      max-width: 220px;
+    }
+    .flood-popup .maplibregl-popup-tip { display: none; }
+    .flood-popup .maplibregl-popup-close-button { display: none; }
+
+    .tip-title { font-weight: 700; margin-bottom: 3px; }
+    .tip-risk  { font-size: 0.75rem; margin-top: 3px; }
+
+    /* ── Attribution ── */
+    .data-attr {
+      position: absolute;
+      bottom: 8px; right: 14px;
+      font-size: 0.68rem;
+      color: rgba(255,255,255,0.25);
+      z-index: 100;
+    }
+    .data-attr a { color: rgba(100,160,255,0.5); text-decoration: none; }
+
+    /* ── Disclaimer ── */
+    #disclaimer {
+      position: absolute;
+      bottom: 36px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(11,15,30,0.85);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 14px;
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      z-index: 100;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 640px) {
+      #header { padding: 10px 14px; }
+      #header-title h1 { font-size: 1rem; }
+      #search-wrap { max-width: 100%; width: 100%; }
+      #layer-panel { display: none; }
+      #risk-panel { width: calc(100vw - 28px); right: 14px; top: auto; bottom: 60px; }
+      #disclaimer { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="header">
+  <div id="header-title">
+    <span class="icon">🌊</span>
+    <h1>NYC <span>Flood Risk</span> Map</h1>
+  </div>
+  <div id="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="address-input" type="text" placeholder="Search any NYC address…" autocomplete="off" spellcheck="false" />
+    <div id="autocomplete-list"></div>
+  </div>
+</div>
+
+<div id="map-wrap">
+  <div id="map"></div>
+
+  <!-- Layer Controls -->
+  <div id="layer-panel" class="fp">
+    <h3>Flood Layers</h3>
+
+    <div class="layer-row" onclick="toggleLayer('stormwater-extreme')">
+      <div class="layer-swatch" style="background:#1d4ed8"></div>
+      <span class="layer-name">Extreme Stormwater<br><span style="font-size:.7rem;color:var(--text-muted)">Deep flooding (≥1 ft)</span></span>
+      <div class="toggle-pill on" id="tog-stormwater-extreme"></div>
+    </div>
+
+    <div class="layer-row" onclick="toggleLayer('stormwater-nuisance')">
+      <div class="layer-swatch" style="background:#60a5fa"></div>
+      <span class="layer-name">Nuisance Stormwater<br><span style="font-size:.7rem;color:var(--text-muted)">Minor flooding (4"–1 ft)</span></span>
+      <div class="toggle-pill on" id="tog-stormwater-nuisance"></div>
+    </div>
+
+    <div class="layer-row" onclick="toggleLayer('slr2020')">
+      <div class="layer-swatch" style="background:#7c3aed"></div>
+      <span class="layer-name">Sea Level Rise 2020s<br><span style="font-size:.7rem;color:var(--text-muted)">100-yr floodplain +11" SLR</span></span>
+      <div class="toggle-pill on" id="tog-slr2020"></div>
+    </div>
+
+    <div class="layer-row" onclick="toggleLayer('slr2050')">
+      <div class="layer-swatch" style="background:#a78bfa"></div>
+      <span class="layer-name">Sea Level Rise 2050s<br><span style="font-size:.7rem;color:var(--text-muted)">100-yr floodplain +31" SLR</span></span>
+      <div class="toggle-pill" id="tog-slr2050"></div>
+    </div>
+
+    <div class="layer-row" onclick="toggleLayer('evac')">
+      <div class="layer-swatch" style="background:#f59e0b"></div>
+      <span class="layer-name">Hurricane Evac Zones<br><span style="font-size:.7rem;color:var(--text-muted)">Storm surge zones 1–6</span></span>
+      <div class="toggle-pill on" id="tog-evac"></div>
+    </div>
+
+    <div class="layer-row" onclick="toggleLayer('sandy')">
+      <div class="layer-swatch" style="background:#92400e"></div>
+      <span class="layer-name">Sandy Inundation (2012)<br><span style="font-size:.7rem;color:var(--text-muted)">Historical flood footprint</span></span>
+      <div class="toggle-pill" id="tog-sandy"></div>
+    </div>
+
+    <div class="layer-row" onclick="toggleLayer('fema-wms')">
+      <div class="layer-swatch" style="background:#ef4444"></div>
+      <span class="layer-name">FEMA Flood Zones<br><span style="font-size:.7rem;color:var(--text-muted)">NFHL effective FIRMs</span></span>
+      <div class="toggle-pill on" id="tog-fema-wms"></div>
+    </div>
+  </div>
+
+  <!-- Legend -->
+  <div id="legend" class="fp">
+    <h3>Legend</h3>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(239,68,68,.65)"></div><span class="legend-lbl">FEMA High Hazard (A/V Zone)</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(251,146,60,.6)"></div><span class="legend-lbl">FEMA Moderate (500-yr)</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(29,78,216,.75)"></div><span class="legend-lbl">Stormwater Deep Flood</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(96,165,250,.65)"></div><span class="legend-lbl">Stormwater Nuisance</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(124,58,237,.65)"></div><span class="legend-lbl">Sea Level Rise 2020s</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(167,139,250,.5)"></div><span class="legend-lbl">Sea Level Rise 2050s</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(245,158,11,.5)"></div><span class="legend-lbl">Hurricane Evac Zone</span></div>
+    <div class="legend-row"><div class="legend-box" style="background:rgba(146,64,14,.5)"></div><span class="legend-lbl">Sandy 2012 Inundation</span></div>
+  </div>
+
+  <!-- Risk Panel -->
+  <div id="risk-panel" class="fp">
+    <div class="rp-header">
+      <div>
+        <div class="rp-addr" id="rp-addr">—</div>
+        <div class="rp-place" id="rp-place">Search or click map</div>
+      </div>
+      <button id="rp-close" onclick="closeRiskPanel()" title="Close">×</button>
+    </div>
+
+    <div class="risk-score-row">
+      <div class="risk-badge rb-0" id="risk-badge">—</div>
+      <div>
+        <div class="risk-title" id="risk-title">Analyzing…</div>
+        <div class="risk-subtitle" id="risk-subtitle">Querying flood databases</div>
+      </div>
+    </div>
+
+    <div class="risk-bars" id="risk-bars">
+      <div class="risk-bar"></div>
+      <div class="risk-bar"></div>
+      <div class="risk-bar"></div>
+      <div class="risk-bar"></div>
+      <div class="risk-bar"></div>
+    </div>
+
+    <hr class="rp-divider" />
+    <div id="risk-factors">
+      <div style="font-size:.8rem;color:var(--text-muted)">Loading flood risk data…</div>
+    </div>
+  </div>
+
+  <!-- Loading indicator -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <span id="loading-text">Loading…</span>
+  </div>
+
+  <div id="disclaimer">For informational purposes only · Not for emergency decisions · Data: NYC Open Data, FEMA NFHL</div>
+  <div class="data-attr">
+    <a href="https://opendata.cityofnewyork.us/" target="_blank">NYC Open Data</a> ·
+    <a href="https://www.fema.gov/flood-maps" target="_blank">FEMA NFHL</a>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  NYC FLOOD RISK MAP  —  Data: NYC Open Data + FEMA NFHL
+// ════════════════════════════════════════════════════════════════
+
+const SOCRATA = 'https://data.cityofnewyork.us/resource/';
+const GEO_SEARCH = 'https://geosearch.planninglabs.nyc/v2/';
+
+// Dataset IDs from NYC Open Data
+const DS = {
+  stormwater:  'w8eg-8ha6', // NYC Stormwater Flood Map – Extreme Flood (+2080 SLR)
+  slr2020:     'ezfn-5dsb', // Sea Level Rise 2020s 100-yr Floodplain (+11" SLR)
+  slr2050:     'hbw8-2bah', // Sea Level Rise 2050s 100-yr Floodplain (+31" SLR)
+  evac:        'uihr-hn7s', // Hurricane Evacuation Zones
+  sandy:       'uyj8-7rv5', // Sandy Inundation Zone (2012)
+};
+
+// FEMA NFHL REST (ArcGIS)
+const FEMA_LAYER_URL = 'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query';
+// FEMA WMS tile service
+const FEMA_WMS = 'https://hazards.fema.gov/gis/nfhl/rest/services/NFHL/MapServer/WMSServer';
+
+// ── Layer visibility state ──
+const layerVisible = {
+  'stormwater-extreme': true,
+  'stormwater-nuisance': true,
+  'slr2020': true,
+  'slr2050': false,
+  'evac': true,
+  'sandy': false,
+  'fema-wms': true,
+};
+
+// ── Risk Levels ──
+const RISK_LEVELS = [
+  { score: 0, label: 'Minimal Risk',   sub: 'Not in any mapped flood zone',                   color: '#22c55e' },
+  { score: 1, label: 'Low Risk',       sub: 'Minor potential flooding in severe storms',       color: '#84cc16' },
+  { score: 2, label: 'Moderate Risk',  sub: 'In 500-year floodplain or future SLR projection', color: '#eab308' },
+  { score: 3, label: 'Elevated Risk',  sub: 'Multiple flood hazards or storm surge zone',      color: '#f97316' },
+  { score: 4, label: 'High Risk',      sub: '100-year floodplain — flood insurance likely required', color: '#ef4444' },
+  { score: 5, label: 'Very High Risk', sub: 'Coastal hazard zone — major flooding during storms',    color: '#991b1b' },
+];
+
+// FEMA zone risk info
+const FEMA_ZONES = {
+  VE:  { score: 5, label: 'FEMA Zone VE — Coastal High Hazard',   desc: 'Coastal zone with 1% annual flood chance and significant wave action (3+ ft). Highest-priority flood insurance zone.',    cls: 'fc-high' },
+  V:   { score: 5, label: 'FEMA Zone V — Coastal High Hazard',    desc: 'Coastal zone with 1% annual flood chance. Velocity wave action.',                                                          cls: 'fc-high' },
+  AE:  { score: 4, label: 'FEMA Zone AE — High Flood Risk',       desc: '1% annual chance of flooding (100-year flood) with Base Flood Elevations. Federal flood insurance is required for most mortgages.', cls: 'fc-high' },
+  A:   { score: 4, label: 'FEMA Zone A — High Flood Risk',        desc: '1% annual chance of flooding. No Base Flood Elevation determined. Insurance may be required.',                             cls: 'fc-high' },
+  AO:  { score: 3, label: 'FEMA Zone AO — Shallow Flood Hazard',  desc: 'Shallow sheet-flow flooding with average depth 1–3 ft. 1% annual chance.',                                               cls: 'fc-med' },
+  AH:  { score: 3, label: 'FEMA Zone AH — Shallow Ponding',       desc: 'Shallow pond flooding (≤3 ft depth). 1% annual chance.',                                                                   cls: 'fc-med' },
+  X:   { score: 0, label: 'FEMA Zone X — Minimal Risk',           desc: 'Outside 100-year and 500-year floodplains. Minimal FEMA-mapped flood risk.',                                               cls: 'fc-ok'  },
+  XS:  { score: 2, label: 'FEMA Zone X (Shaded) — Moderate Risk', desc: '0.2% annual flood chance (500-year flood). Lower risk but still vulnerable to large storms.',                              cls: 'fc-low' },
+};
+
+// ════════════════════════════════════════════════════════════════
+//  Map Initialization
+// ════════════════════════════════════════════════════════════════
+const map = new maplibregl.Map({
+  container: 'map',
+  style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  center: [-73.98, 40.71],
+  zoom: 11,
+  maxBounds: [[-74.6, 40.3], [-73.1, 41.1]],
+});
+
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+// Hover popup
+const hoverPopup = new maplibregl.Popup({
+  closeButton: false,
+  closeOnClick: false,
+  className: 'flood-popup',
+  maxWidth: '240px',
+});
+
+// Marker for searched/clicked location
+let locationMarker = null;
+
+// ════════════════════════════════════════════════════════════════
+//  Data Loading
+// ════════════════════════════════════════════════════════════════
+
+function socrataGeoJsonUrl(datasetId, extraWhere = '', limit = 100000) {
+  let url = `${SOCRATA}${datasetId}.geojson?$limit=${limit}`;
+  if (extraWhere) url += `&$where=${encodeURIComponent(extraWhere)}`;
+  return url;
+}
+
+// Build Socrata viewport bounding-box filter
+function bboxWhere(bounds) {
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  // within_box(geom, lat_sw, lon_sw, lat_ne, lon_ne)
+  return `within_box(the_geom,${sw.lat},${sw.lng},${ne.lat},${ne.lng})`;
+}
+
+// Fetch and return GeoJSON (with error handling)
+async function fetchGeo(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// Point-in-polygon query via Socrata intersects
+async function socrataPointQuery(datasetId, lat, lng) {
+  const pt = `'POINT(${lng} ${lat})'`;
+  const url = `${SOCRATA}${datasetId}.geojson?$where=${encodeURIComponent(`intersects(the_geom,${pt})`)}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return [];
+    const d = await r.json();
+    return d.features || [];
+  } catch { return []; }
+}
+
+// FEMA ArcGIS REST point query
+async function femaPointQuery(lat, lng) {
+  const params = new URLSearchParams({
+    geometry: `${lng},${lat}`,
+    geometryType: 'esriGeometryPoint',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: 'FLD_ZONE,ZONE_SUBTY,SFHA_TF',
+    returnGeometry: 'false',
+    f: 'json',
+  });
+  try {
+    const r = await fetch(`${FEMA_LAYER_URL}?${params}`);
+    if (!r.ok) return null;
+    return r.json();
+  } catch { return null; }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Layer Setup (called after map style loads)
+// ════════════════════════════════════════════════════════════════
+map.on('load', async () => {
+
+  // ── FEMA WMS Raster layer ──
+  map.addSource('fema-wms-src', {
+    type: 'raster',
+    tiles: [
+      `${FEMA_WMS}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=28` +
+      `&FORMAT=image%2Fpng&TRANSPARENT=TRUE&HEIGHT=256&WIDTH=256` +
+      `&SRS=EPSG%3A3857&BBOX={bbox-epsg-3857}`
+    ],
+    tileSize: 256,
+    attribution: 'FEMA NFHL',
+  });
+  map.addLayer({
+    id: 'fema-wms',
+    type: 'raster',
+    source: 'fema-wms-src',
+    paint: { 'raster-opacity': layerVisible['fema-wms'] ? 0.65 : 0 },
+  });
+
+  // ── Stormwater (dynamic, viewport-based) ──
+  map.addSource('stormwater', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    promoteId: 'objectid',
+  });
+
+  // Deep flooding layer (flooding_cat = 'Deep and Contiguous Flooding')
+  map.addLayer({
+    id: 'stormwater-extreme',
+    type: 'fill',
+    source: 'stormwater',
+    filter: ['==', ['get', 'flooding_cat'], 'Deep and Contiguous Flooding'],
+    paint: {
+      'fill-color': '#1d4ed8',
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 0.85, 0.65
+      ],
+    },
+  });
+
+  // Nuisance flooding layer
+  map.addLayer({
+    id: 'stormwater-nuisance',
+    type: 'fill',
+    source: 'stormwater',
+    filter: ['==', ['get', 'flooding_cat'], 'Nuisance Flooding'],
+    paint: {
+      'fill-color': '#60a5fa',
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 0.75, 0.5
+      ],
+    },
+  });
+
+  // ── Sea Level Rise 2020s ──
+  map.addSource('slr2020', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    promoteId: 'objectid',
+  });
+  map.addLayer({
+    id: 'slr2020',
+    type: 'fill',
+    source: 'slr2020',
+    paint: {
+      'fill-color': '#7c3aed',
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 0.75, 0.5
+      ],
+    },
+  });
+
+  // ── Sea Level Rise 2050s ──
+  map.addSource('slr2050', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    promoteId: 'objectid',
+  });
+  map.addLayer({
+    id: 'slr2050',
+    type: 'fill',
+    source: 'slr2050',
+    paint: {
+      'fill-color': '#a78bfa',
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 0.7, 0.45
+      ],
+    },
+    layout: { visibility: layerVisible['slr2050'] ? 'visible' : 'none' },
+  });
+
+  // ── Hurricane Evacuation Zones ──
+  map.addSource('evac', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    promoteId: 'objectid',
+  });
+  map.addLayer({
+    id: 'evac',
+    type: 'fill',
+    source: 'evac',
+    paint: {
+      'fill-color': [
+        'match', ['to-string', ['get', 'zone']],
+        '1', '#dc2626',
+        '2', '#f97316',
+        '3', '#fbbf24',
+        '4', '#a3e635',
+        '5', '#86efac',
+        '#f59e0b'
+      ],
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 0.65,
+        ['match', ['to-string', ['get', 'zone']],
+          '1', 0.45, '2', 0.38, '3', 0.3, '4', 0.22, '5', 0.15, 0.3
+        ]
+      ],
+    },
+  });
+  map.addLayer({
+    id: 'evac-border',
+    type: 'line',
+    source: 'evac',
+    paint: {
+      'line-color': '#f59e0b',
+      'line-width': 0.8,
+      'line-opacity': 0.5,
+    },
+  });
+
+  // ── Sandy Inundation ──
+  map.addSource('sandy', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+    promoteId: 'objectid',
+  });
+  map.addLayer({
+    id: 'sandy',
+    type: 'fill',
+    source: 'sandy',
+    paint: {
+      'fill-color': '#92400e',
+      'fill-opacity': [
+        'case', ['boolean', ['feature-state', 'hover'], false], 0.65, 0.4
+      ],
+    },
+    layout: { visibility: layerVisible['sandy'] ? 'visible' : 'none' },
+  });
+
+  // ── Hover outlines ──
+  for (const id of ['stormwater-extreme', 'stormwater-nuisance', 'slr2020', 'slr2050', 'evac', 'sandy']) {
+    const src = id.startsWith('stormwater') ? 'stormwater' : id;
+    map.addLayer({
+      id: `${id}-outline`,
+      type: 'line',
+      source: src,
+      ...(id.startsWith('stormwater') ? { filter: map.getLayer(id).filter } : {}),
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': ['case', ['boolean', ['feature-state', 'hover'], false], 1.5, 0],
+        'line-opacity': 0.6,
+      },
+    });
+  }
+
+  // Load all data
+  await Promise.all([
+    loadViewportData(),
+    loadStaticData(),
+  ]);
+
+  // Set up hover interactions
+  setupHover('stormwater-extreme', 'stormwater', getStormwaterTooltip);
+  setupHover('stormwater-nuisance', 'stormwater', getStormwaterTooltip);
+  setupHover('slr2020', 'slr2020', getSLRTooltip('2020s', '+11 inches'));
+  setupHover('slr2050', 'slr2050', getSLRTooltip('2050s', '+31 inches'));
+  setupHover('evac', 'evac', getEvacTooltip);
+  setupHover('sandy', 'sandy', getSandyTooltip);
+
+  // Click for risk assessment
+  map.on('click', onMapClick);
+});
+
+// ════════════════════════════════════════════════════════════════
+//  Data Fetching
+// ════════════════════════════════════════════════════════════════
+
+async function loadStaticData() {
+  // Evacuation zones and Sandy – small enough to load all at once
+  const [evacData, sandyData] = await Promise.allSettled([
+    fetchGeo(socrataGeoJsonUrl(DS.evac, '', 500)),
+    fetchGeo(socrataGeoJsonUrl(DS.sandy, '', 100)),
+  ]);
+
+  if (evacData.status === 'fulfilled') {
+    map.getSource('evac').setData(evacData.value);
+  }
+  if (sandyData.status === 'fulfilled') {
+    map.getSource('sandy').setData(sandyData.value);
+  }
+}
+
+let vpLoadTimer = null;
+
+async function loadViewportData() {
+  const bounds = map.getBounds();
+  const where = bboxWhere(bounds);
+  setLoading('Loading flood layers…');
+
+  const [swData, slr2020Data, slr2050Data] = await Promise.allSettled([
+    fetchGeo(socrataGeoJsonUrl(DS.stormwater, where, 10000)),
+    fetchGeo(socrataGeoJsonUrl(DS.slr2020,    where, 5000)),
+    fetchGeo(socrataGeoJsonUrl(DS.slr2050,    where, 5000)),
+  ]);
+
+  if (swData.status === 'fulfilled')    map.getSource('stormwater').setData(swData.value);
+  if (slr2020Data.status === 'fulfilled') map.getSource('slr2020').setData(slr2020Data.value);
+  if (slr2050Data.status === 'fulfilled') map.getSource('slr2050').setData(slr2050Data.value);
+
+  setLoading(null);
+}
+
+// Reload viewport data when user pans/zooms (debounced, only when zoomed in enough)
+map.on('moveend', () => {
+  if (map.getZoom() < 10) return; // Skip at low zoom (too much data)
+  clearTimeout(vpLoadTimer);
+  vpLoadTimer = setTimeout(loadViewportData, 600);
+});
+
+// ════════════════════════════════════════════════════════════════
+//  Layer Toggle
+// ════════════════════════════════════════════════════════════════
+
+function toggleLayer(id) {
+  layerVisible[id] = !layerVisible[id];
+  const pill = document.getElementById(`tog-${id}`);
+  if (pill) pill.classList.toggle('on', layerVisible[id]);
+
+  if (id === 'fema-wms') {
+    map.setPaintProperty('fema-wms', 'raster-opacity', layerVisible[id] ? 0.65 : 0);
+    return;
+  }
+
+  const vis = layerVisible[id] ? 'visible' : 'none';
+  if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis);
+  if (map.getLayer(`${id}-outline`)) map.setLayoutProperty(`${id}-outline`, 'visibility', vis);
+
+  // Stormwater shares a source — also toggle outline for sibling
+  if (id === 'stormwater-extreme' && map.getLayer('stormwater-nuisance')) {
+    // Don't hide sibling, each is independently toggled
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Hover Interactions
+// ════════════════════════════════════════════════════════════════
+
+let hoveredIds = {}; // { layerId: { source, id } }
+
+function setupHover(layerId, sourceId, tooltipFn) {
+  map.on('mousemove', layerId, (e) => {
+    map.getCanvas().style.cursor = 'pointer';
+    if (!e.features.length) return;
+    const feat = e.features[0];
+    const fid = feat.id ?? feat.properties?.objectid;
+
+    // Clear previous hover state for this layer
+    if (hoveredIds[layerId]) {
+      const prev = hoveredIds[layerId];
+      map.setFeatureState({ source: prev.source, id: prev.id }, { hover: false });
+    }
+
+    hoveredIds[layerId] = { source: sourceId, id: fid };
+    map.setFeatureState({ source: sourceId, id: fid }, { hover: true });
+
+    hoverPopup
+      .setLngLat(e.lngLat)
+      .setHTML(tooltipFn(feat))
+      .addTo(map);
+  });
+
+  map.on('mouseleave', layerId, () => {
+    map.getCanvas().style.cursor = '';
+    if (hoveredIds[layerId]) {
+      const prev = hoveredIds[layerId];
+      map.setFeatureState({ source: prev.source, id: prev.id }, { hover: false });
+      hoveredIds[layerId] = null;
+    }
+    hoverPopup.remove();
+  });
+}
+
+// ── Tooltip builders ──
+
+function getStormwaterTooltip(feat) {
+  const cat = feat.properties?.flooding_cat || 'Stormwater Flooding';
+  const isDeep = cat === 'Deep and Contiguous Flooding';
+  return `
+    <div class="tip-title">🌧 ${isDeep ? 'Deep Stormwater Flooding' : 'Nuisance Flooding'}</div>
+    <div>${isDeep
+      ? 'Depth <strong>≥ 1 foot</strong> during extreme rainfall (3.66"/hr). High risk of property damage and street closures.'
+      : 'Depth <strong>4 inches – 1 foot</strong> during extreme rainfall. Can flood basements and ground floors.'}
+    </div>
+    <div class="tip-risk" style="color:${isDeep ? '#60a5fa' : '#93c5fd'}">
+      ${isDeep ? '⚠ Risk Level: High' : 'ℹ Risk Level: Moderate'}
+    </div>`;
+}
+
+const getSLRTooltip = (decade, rise) => (feat) => `
+  <div class="tip-title">📈 Sea Level Rise ${decade} Floodplain</div>
+  <div>100-year flood boundary with <strong>${rise}</strong> of projected sea level rise.</div>
+  <div class="tip-risk" style="color:#a78bfa">⚠ Future flood risk</div>`;
+
+function getEvacTooltip(feat) {
+  const zone = feat.properties?.zone || '?';
+  const msgs = {
+    '1': 'Highest storm surge risk. Evacuate before <strong>any</strong> hurricane.',
+    '2': 'High risk. Evacuate for Category 2+ hurricanes.',
+    '3': 'Moderate risk. Evacuate for Category 3+ storms.',
+    '4': 'Lower risk. Evacuate for Category 4+ storms.',
+    '5': 'Low risk. Evacuate only for Category 5 storms.',
+  };
+  return `
+    <div class="tip-title">🚨 Hurricane Evacuation Zone ${zone}</div>
+    <div>${msgs[String(zone)] || 'Storm surge risk area.'}</div>
+    <div class="tip-risk" style="color:#fbbf24">NYC Emergency Mgmt Zone</div>`;
+}
+
+function getSandyTooltip(feat) {
+  return `
+    <div class="tip-title">🌀 Hurricane Sandy Inundation (2012)</div>
+    <div>This area was flooded by Superstorm Sandy on Oct. 29, 2012, demonstrating real coastal flood risk.</div>
+    <div class="tip-risk" style="color:#d97706">Historical record</div>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Address Search
+// ════════════════════════════════════════════════════════════════
+
+let acResults = [];
+let acIndex = -1;
+let acTimer = null;
+
+const input = document.getElementById('address-input');
+const acList = document.getElementById('autocomplete-list');
+
+input.addEventListener('input', () => {
+  const q = input.value.trim();
+  clearTimeout(acTimer);
+  if (q.length < 3) { hideAC(); return; }
+  acTimer = setTimeout(() => searchAddresses(q), 280);
+});
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); acIndex = Math.min(acIndex + 1, acResults.length - 1); renderAC(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); acIndex = Math.max(acIndex - 1, 0); renderAC(); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (acIndex >= 0) pickResult(acResults[acIndex]); else if (acResults[0]) pickResult(acResults[0]); }
+  else if (e.key === 'Escape') hideAC();
+});
+
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('search-wrap').contains(e.target)) hideAC();
+});
+
+async function searchAddresses(q) {
+  try {
+    const url = `${GEO_SEARCH}search?text=${encodeURIComponent(q)}&size=6`;
+    const r = await fetch(url);
+    const d = await r.json();
+    acResults = (d.features || []).filter(f => f.geometry?.coordinates);
+    acIndex = -1;
+    renderAC();
+  } catch { /* network error */ }
+}
+
+function renderAC() {
+  if (!acResults.length) { hideAC(); return; }
+  acList.innerHTML = acResults.map((f, i) => {
+    const props = f.properties;
+    const label = props.label || '';
+    const parts = label.split(',');
+    const main = parts[0];
+    const sub = parts.slice(1, 3).join(',').trim();
+    return `<div class="ac-item${i === acIndex ? ' ac-active' : ''}" onclick="pickResult(acResults[${i}])">
+      <div class="ac-main">${escHtml(main)}</div>
+      ${sub ? `<div class="ac-sub">${escHtml(sub)}</div>` : ''}
+    </div>`;
+  }).join('');
+  acList.style.display = 'block';
+}
+
+function hideAC() {
+  acList.style.display = 'none';
+  acResults = [];
+  acIndex = -1;
+}
+
+function pickResult(feature) {
+  const [lng, lat] = feature.geometry.coordinates;
+  const props = feature.properties;
+  input.value = props.label || '';
+  hideAC();
+  map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 15), duration: 900 });
+  openRiskPanel(props.label || `${lat.toFixed(5)}, ${lng.toFixed(5)}`, props.borough || props.region || 'New York City');
+  assessRisk(lat, lng);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Map Click → Risk Assessment
+// ════════════════════════════════════════════════════════════════
+
+async function onMapClick(e) {
+  const { lat, lng } = e.lngLat;
+
+  // Reverse geocode
+  let address = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  let borough = 'New York City';
+  try {
+    const r = await fetch(`${GEO_SEARCH}reverse?point.lat=${lat}&point.lon=${lng}`);
+    const d = await r.json();
+    const f = d.features?.[0];
+    if (f) { address = f.properties.label || address; borough = f.properties.borough || f.properties.region || borough; }
+  } catch { /* ok */ }
+
+  openRiskPanel(address, borough);
+  assessRisk(lat, lng);
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Risk Assessment
+// ════════════════════════════════════════════════════════════════
+
+function openRiskPanel(address, place) {
+  document.getElementById('rp-addr').textContent = address;
+  document.getElementById('rp-place').textContent = place;
+  document.getElementById('risk-panel').classList.add('open');
+  document.getElementById('risk-badge').className = 'risk-badge rb-0';
+  document.getElementById('risk-badge').textContent = '…';
+  document.getElementById('risk-title').textContent = 'Analyzing…';
+  document.getElementById('risk-subtitle').textContent = 'Querying flood databases';
+  document.getElementById('risk-factors').innerHTML = '<div style="font-size:.8rem;color:var(--text-muted)">Loading flood risk data…</div>';
+  resetBars(0);
+}
+
+function closeRiskPanel() {
+  document.getElementById('risk-panel').classList.remove('open');
+  if (locationMarker) { locationMarker.remove(); locationMarker = null; }
+}
+
+async function assessRisk(lat, lng) {
+  // Place a location pin
+  if (locationMarker) locationMarker.remove();
+  locationMarker = new maplibregl.Marker({ color: '#3b82f6' })
+    .setLngLat([lng, lat])
+    .addTo(map);
+
+  // Run all queries in parallel
+  const [femaResult, swFeats, slr2020Feats, slr2050Feats, evacFeats, sandyFeats] =
+    await Promise.allSettled([
+      femaPointQuery(lat, lng),
+      socrataPointQuery(DS.stormwater, lat, lng),
+      socrataPointQuery(DS.slr2020,    lat, lng),
+      socrataPointQuery(DS.slr2050,    lat, lng),
+      socrataPointQuery(DS.evac,       lat, lng),
+      socrataPointQuery(DS.sandy,      lat, lng),
+    ]);
+
+  const factors = [];
+  let score = 0;
+
+  // ── FEMA Zone ──
+  if (femaResult.status === 'fulfilled' && femaResult.value?.features?.length) {
+    const attrs = femaResult.value.features[0].attributes;
+    const zone = (attrs?.FLD_ZONE || '').trim().toUpperCase();
+    let info = FEMA_ZONES[zone] || FEMA_ZONES[zone.replace(/\s.*/, '')] || null;
+
+    // Detect shaded X (moderate)
+    if ((zone === 'X' || zone === 'X ') && attrs?.ZONE_SUBTY?.includes('MODERATE')) {
+      info = FEMA_ZONES['XS'];
+    }
+
+    if (info && info.score > 0) {
+      score = Math.max(score, info.score);
+      factors.push({ icon: '🗺', title: info.label, desc: info.desc, cls: info.cls });
+    }
+  }
+
+  // ── Stormwater ──
+  if (swFeats.status === 'fulfilled' && swFeats.value?.length) {
+    const cats = swFeats.value.map(f => f.properties?.flooding_cat || '');
+    if (cats.some(c => c === 'Deep and Contiguous Flooding')) {
+      score = Math.max(score, 4);
+      factors.push({
+        icon: '🌧',
+        title: 'Extreme Stormwater Flooding — Deep',
+        desc: 'During extreme rainfall (3.66"/hr), this location floods to depths of 1 foot or more. Based on DEP Stormwater Flood Map with 2080 sea level rise.',
+        cls: 'fc-high',
+      });
+    } else if (cats.some(c => c === 'Nuisance Flooding')) {
+      score = Math.max(score, 2);
+      factors.push({
+        icon: '🌧',
+        title: 'Stormwater Nuisance Flooding',
+        desc: 'During extreme rainfall, this location experiences 4"–12" of flooding. Low-lying areas and basements may be affected.',
+        cls: 'fc-low',
+      });
+    }
+  }
+
+  // ── Sea Level Rise 2020s ──
+  if (slr2020Feats.status === 'fulfilled' && slr2020Feats.value?.length) {
+    score = Math.max(score, 3);
+    factors.push({
+      icon: '📈',
+      title: '2020s 100-Year Coastal Floodplain',
+      desc: 'Within the current 100-year floodplain accounting for present-day sea level rise (+11 inches). Coastal flooding risk in major storm events.',
+      cls: 'fc-med',
+    });
+  }
+
+  // ── Sea Level Rise 2050s ──
+  if (slr2050Feats.status === 'fulfilled' && slr2050Feats.value?.length) {
+    const bonus = slr2020Feats.status === 'fulfilled' && slr2020Feats.value?.length ? 0 : 2;
+    score = Math.max(score, 2 + bonus);
+    factors.push({
+      icon: '🔮',
+      title: 'Future Risk: 2050s Floodplain',
+      desc: 'With projected sea level rise of 31 inches by 2050, this location will be within the 100-year floodplain. Critical for long-term property planning.',
+      cls: 'fc-low',
+    });
+  }
+
+  // ── Hurricane Evacuation ──
+  if (evacFeats.status === 'fulfilled' && evacFeats.value?.length) {
+    const zone = String(evacFeats.value[0]?.properties?.zone || '?');
+    const zn = parseInt(zone);
+    const evacScore = isNaN(zn) ? 1 : Math.max(0, 5 - zn);
+    score = Math.max(score, Math.min(score + 1, evacScore));
+    const msgs = {
+      '1': 'Highest priority — must evacuate before any hurricane landfall.',
+      '2': 'High priority — evacuate for Category 2+ storms.',
+      '3': 'Moderate priority — evacuate for Category 3+ storms.',
+      '4': 'Lower priority — evacuate for Category 4+ storms.',
+      '5': 'Lowest priority — evacuate for Category 5 storms only.',
+    };
+    factors.push({
+      icon: '🚨',
+      title: `Hurricane Evacuation Zone ${zone}`,
+      desc: msgs[zone] || 'Located in a NYC hurricane evacuation zone. Follow NYC Emergency Management guidance.',
+      cls: zn <= 2 ? 'fc-high' : zn === 3 ? 'fc-med' : 'fc-low',
+    });
+  }
+
+  // ── Sandy Inundation ──
+  if (sandyFeats.status === 'fulfilled' && sandyFeats.value?.length) {
+    score = Math.max(score, Math.min(score + 1, 4));
+    factors.push({
+      icon: '🌀',
+      title: 'Sandy 2012 Inundation Area',
+      desc: 'This location was flooded during Superstorm Sandy (Oct. 29, 2012). Historical flooding is a strong predictor of future flood risk.',
+      cls: 'fc-med',
+    });
+  }
+
+  // ── No hazards found ──
+  if (factors.length === 0) {
+    factors.push({
+      icon: '✅',
+      title: 'No mapped flood hazards identified',
+      desc: 'This location does not appear in any queried NYC flood zone, sea level rise projection, or hurricane evacuation zone. Note: all areas can experience localized flooding from drainage issues.',
+      cls: 'fc-ok',
+    });
+  }
+
+  // Update risk badge marker color
+  if (locationMarker) {
+    locationMarker.remove();
+    const clampedScore = Math.min(score, 5);
+    locationMarker = new maplibregl.Marker({ color: RISK_LEVELS[clampedScore].color })
+      .setLngLat([lng, lat])
+      .addTo(map);
+  }
+
+  renderRiskPanel(Math.min(score, 5), factors);
+}
+
+function renderRiskPanel(score, factors) {
+  const info = RISK_LEVELS[score];
+  const badge = document.getElementById('risk-badge');
+  badge.textContent = score;
+  badge.className = `risk-badge rb-${score}`;
+  document.getElementById('risk-title').textContent = info.label;
+  document.getElementById('risk-subtitle').textContent = info.sub;
+  resetBars(score, info.color);
+
+  document.getElementById('risk-factors').innerHTML = factors.map(f => `
+    <div class="factor">
+      <div class="factor-icon">${f.icon}</div>
+      <div>
+        <div class="factor-title ${f.cls}">${f.title}</div>
+        <div class="factor-desc">${f.desc}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function resetBars(score, color = '#22c55e') {
+  document.querySelectorAll('#risk-bars .risk-bar').forEach((bar, i) => {
+    bar.style.background = i < score ? color : '';
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Utilities
+// ════════════════════════════════════════════════════════════════
+
+function setLoading(msg) {
+  const el = document.getElementById('loading');
+  if (msg) {
+    document.getElementById('loading-text').textContent = msg;
+    el.classList.add('show');
+  } else {
+    el.classList.remove('show');
+  }
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+</script>
+</body>
+</html>
