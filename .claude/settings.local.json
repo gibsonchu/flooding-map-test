@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /Users/gibson/ClaudeCode/floodingsite && node --version && npm --version2)",
+      "Bash(npm create vite@latest . -- --template react-ts 2>&1)",
+      "Bash(curl -s \"https://data.cityofnewyork.us/api/views/9i7c-xyvv.json\" 2>&1 | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(c['fieldName'], c.get\\('name',''\\)\\) for c in d.get\\('columns',[]\\)]\" 2>&12212)",
+      "Bash(npm run fetch-data)"
+    ]
+  }
+}
